@@ -1,0 +1,18 @@
+{
+    "name": "tomatechaccountapi",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "build": "tsc",
+        "push": "npm run build && clasp push"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs",
+    "devDependencies": {
+        "@types/google-apps-script": "^1.0.99",
+        "typescript": "^5.9.2"
+    }
+}
