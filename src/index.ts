@@ -8,25 +8,23 @@ const ROAMBIRD_INFO_LEN = 6;
 const ACCOUNT_SHEET_NAME = "Account";
 const ROAMBIRD_SHEET_NAME = "RoamBird";
 
-/**
-1. 認証トークン（JWTなど）
-クライアントはログイン情報を送信し、GASがJWTを発行
+type AccountInfo = {
+    username: string, // username is unique in TomaTechDatabase
+    password: string
+};
 
-クライアントはAPI呼び出しにJWTを必ずヘッダーに付ける
+type StageData = {
+    totalTimer: string;          // TimeSpan → JSONでは文字列
+    timerPerStage: string;       // 同上
+    totalGoalCounter: number;    // uint → number
+    streakGoalCounter: number;   // uint → number
+};
 
-GASはJWTを検証し、期限切れ・不正なトークンなら拒否
-
-2. API署名検証（HMAC）
-APIリクエストにはパラメータをHMAC署名付きで送信
-
-GASは受け取り次第、署名の正当性を検証し改ざんを防止
-
-4. レートリミット
-GASのCacheServiceを使い、ユーザーごと・IPごとにAPIコール回数を管理
-
-一定期間にアクセス回数を超えたら拒否する制御を入れる
-*/
-
+type TrackData = {
+    trackingDatas: {
+        [key: string]: StageData; // uintキーはJSONでstring化される
+    };
+};
 
 function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
     return ContentService
@@ -34,36 +32,44 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
         .setMimeType(ContentService.MimeType.JSON);
 }
 
-function doPost(e: { parameter: { mode: string; accountData: { username: string; password: string; }; }; headers: { [x: string]: any; }; body: any; }): GoogleAppsScript.Content.TextOutput {
-    const mode = e.parameter.mode;
-    const plainUsername = e.parameter.accountData.username;
-    const plainPassword = e.parameter.accountData.password;
-    const plainToken = e.headers["authorization"];
-    const trackedData = e.body;
+function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.TextOutput {
     let result: boolean = false;
+    let payload: string = "";
+    let plainUsername: string = "";
+    let plainPassword: string = "";
+
+    let body: any;
+    try {
+        body = JSON.parse(e.postData.contents);
+    } catch (err) {
+        return sendJSON({ result: "failed", payload: "Invalid JSON" });
+    }
+    const mode = body.mode as string
+    const plainToken = body.token as string;
+
 
     switch (mode) {
         case "CREATE":
+            plainUsername = body.username as string;
+            plainPassword = body.password as string;
             result = createNewAccount(plainUsername, plainPassword);
-            if (result) {
-                const token = generateToken(plainUsername);
-                return sendJSON({ result: "success", token });
-            }
+            if (result) payload = generateToken(plainUsername);
             break;
 
         case "AUTHENTICATE":
+            plainUsername = body.username as string;
+            plainPassword = body.password as string;
             result = authenticateAccount(plainUsername, plainPassword);
-            if (result) {
-                const token = generateToken(plainUsername);
-                return sendJSON({ result: "success", token });
-            }
+            if (result) payload = generateToken(plainUsername);
             break;
+
         case "PUSH":
+            const trackedData: TrackData = body.trackingDatas as TrackData;
             result = pushTrackedData(plainToken, trackedData);
             break;
 
         case "PULL":
-            result = pullTrackedData(plainToken);
+            ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainToken));
             break;
         default:
             break;
@@ -71,8 +77,8 @@ function doPost(e: { parameter: { mode: string; accountData: { username: string;
 
     logAccess(mode, plainUsername, result);
 
-    const responseJSON = JSON.stringify({ message: "post API", result: result ? "success" : "failed" });
-    return ContentService.createTextOutput(responseJSON).setMimeType(ContentService.MimeType.JSON);
+    let responseObj: { result: string, payload: string } = { result: result ? "success" : "failed", payload: payload };
+    return sendJSON(responseObj);
 }
 
 function logAccess(mode: string, username: string, result: boolean): void {
@@ -94,7 +100,7 @@ function logAccess(mode: string, username: string, result: boolean): void {
 }
 
 function createNewAccount(plainUsername: string, plainPassword: string): boolean {
-    if (plainUsername == null || plainPassword == null) { throw new ReferenceError("user_name or password is null or undefined"); }
+    if (plainUsername == null || plainPassword == null) return false;
 
     const foundRow = searchRowIndexOfMatchedAccount(plainUsername);
     if (foundRow !== -1) return false;
@@ -103,24 +109,24 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     let sheet = ss.getSheetByName(ACCOUNT_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ACCOUNT_SHEET_NAME);
-        sheet.appendRow(["Uuid", "Username", "Password", "Salt"]);
+        sheet.appendRow(["Username", "Password", "Salt", "Token"]);
     }
 
     const lastRow = sheet.getLastRow() + 1;
     const range = sheet.getRange(lastRow, 1, 1, ACCOUNT_INFO_LEN);
 
-    const generatedUuid = Utilities.getUuid();
     const generatedSalt = Utilities.getUuid();
     const authenticPassword = hashPassword(plainPassword, generatedSalt);
+    const generatedToken = generateToken(plainUsername);
 
-    const accountInfo = [[generatedUuid, plainUsername, authenticPassword, generatedSalt]];
+    const accountInfo = [[plainUsername, authenticPassword, generatedSalt, generatedToken]];
     range.setValues(accountInfo)
 
     return true;
 }
 
 function authenticateAccount(plainUsername: string, plainPassword: string): boolean {
-    if (plainUsername == null || plainPassword == null) { throw new ReferenceError("user_name or password is null or undefined"); }
+    if (plainUsername == null || plainPassword == null) return false;
 
     const fonudRow = searchRowIndexOfMatchedAccount(plainUsername);
     if (fonudRow === -1) return false;
@@ -129,61 +135,114 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
     let sheet = ss.getSheetByName(ACCOUNT_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ACCOUNT_SHEET_NAME);
-        sheet.appendRow(["Uuid", "Username", "Password", "Salt"]);
+        sheet.appendRow(["Username", "Password", "Salt", "Token"]);
     }
-    const range = sheet.getRange(fonudRow, 1, 1, ACCOUNT_INFO_LEN).getValues().flat();
+    const range = sheet.getRange(fonudRow, 1, 1, ACCOUNT_INFO_LEN);
+    const values = range.getValues().flat();
 
-    // const storedUuid = range[0];
-    // const storedUsername = range[1];
-    const storedPassword = range[2];
-    const storedSalt = range[3];
+    const storedPassword = values[1];
+    const storedSalt = values[2];
+    const authenticPassword = hashPassword(plainPassword, storedSalt);
+    const generatedToken = generateToken(plainUsername);
 
-    return hashPassword(plainPassword, storedSalt) === storedPassword;
+    const isSuccess = authenticPassword === storedPassword;
+    if (isSuccess) {
+        const accountInfo = [[plainUsername, authenticPassword, storedSalt, generatedToken]];
+        range.setValues(accountInfo)
+    }
+
+    return isSuccess;
 }
 
-function pullTrackedData(token: string): boolean {
+/*
+
+{
+  "mode": "PUSH",
+  "trackingDatas": {
+    "1": {
+      "totalTimer": "00:00:00",
+      "timerPerStage": "10675199.02:48:05.4775807",
+      "totalGoalCounter": 0,
+      "streakGoalCounter": 0
+    },
+    "2": {
+      "totalTimer": "00:05:23.4560000",
+      "timerPerStage": "00:01:00",
+      "totalGoalCounter": 5,
+      "streakGoalCounter": 3
+    }
+  }
+}
+
+*/
+
+
+function pullTrackedData(token: string): { isSuccess: boolean, trackedData: string } {
     console.log("pullTrackedData called with " + token);
-    if (!verifyToken(token)) return false;
-
-    const fonudRow = searchRowIndexOfMatchedRoamBird(plainUsername);
-    if (fonudRow === -1) return false;
-
+    if (!verifyToken(token)) return { isSuccess: false, trackedData: "" };
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
-        sheet.appendRow(["Uuid", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
+        sheet.appendRow(["Username", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
     }
-    const range = sheet.getRange(fonudRow, 1, 1, ROAMBIRD_INFO_LEN).getValues().flat();
+    // const range = sheet.getRange(fonudRow, 1, 1, ROAMBIRD_INFO_LEN).getValues().flat();
 
     // TODO: implement
 
-    return true;
+    return { isSuccess: true, trackedData: /*range.toString()*/ "" };
 }
 
-function pushTrackedData(token: string, trackedData: string): boolean {
-    console.log("pushTrackedData called with token: " + token + " trackedData " + trackedData);
-    if (!verifyToken(token)) return false;
+/*
+{
+  "mode": "PUSH",
+  "token": sometoken
+  "trackingDatas": {
+    "1": {
+      "totalTimer": "00:00:00",
+      "timerPerStage": "10675199.02:48:05.4775807",
+      "totalGoalCounter": 0,
+      "streakGoalCounter": 0
+    },
+    "2": {
+      "totalTimer": "00:05:23.4560000",
+      "timerPerStage": "00:01:00",
+      "totalGoalCounter": 5,
+      "streakGoalCounter": 3
+    }
+  }
+}
+
+*/
+
+function pushTrackedData(token: string, trackedData: TrackData): boolean {
+    console.log("pushTrackedData called with token: " + token + " trackedData: " + trackedData);
+    const { isVerified, username } = verifyToken(token);
+    if (!isVerified) return false;
+
+    const fonudRow = searchRowIndexOfMatchedRoamBird(trackedData.uuid, trackedData.stageIndex);
+    if (fonudRow === -1) return false;
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
-        sheet.appendRow(["Uuid", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
+        sheet.appendRow(["username", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
     }
+    const range = sheet.getRange(fonudRow, 1, 1, ROAMBIRD_INFO_LEN);
+
     // TODO: implement
 
     return true;
 }
 
 function generateToken(username: string): string {
-    const payload = { username };
-    const token = generateJWT(payload, PEPPER, 3600); // available while one hour
+    const token = generateJWT(username, PEPPER, 3600); // available while one hour
     return token;
 }
 
-function verifyToken(token: string): boolean {
+function verifyToken(token: string): { isVerified: boolean; username: string; } {
     return verifyJWT(token, PEPPER);
 }
 
@@ -193,12 +252,12 @@ function base64urlEncode(obj: object): string {
     return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, "");
 }
 
-function generateJWT(payload: object, secret: string, expiresInSec: number): string {
+function generateJWT(username: string, secret: string, expiresInSec: number): string {
     const header = { alg: "HS256", typ: "JWT" };
     const nowSec = Math.floor(Date.now() / 1000);
 
     const fullPayload = {
-        ...payload,
+        username: username,
         iat: nowSec,
         exp: nowSec + expiresInSec
     };
@@ -213,28 +272,25 @@ function generateJWT(payload: object, secret: string, expiresInSec: number): str
     return `${data}.${signatureB64}`;
 }
 
-function verifyJWT(token: string, secret: string): boolean {
+function verifyJWT(token: string, secret: string): { isVerified: boolean, username: string } {
     const parts = token.split(".");
-    if (parts.length !== 3) return false;
+    if (parts.length !== 3) return { isVerified: false, username: "" };
 
     const [headerB64, payloadB64, signatureB64] = parts;
+    if (headerB64 === undefined || payloadB64 === undefined || signatureB64 === undefined) return { isVerified: false, username: "" };
     const data = `${headerB64}.${payloadB64}`;
 
     const expectedSigBytes = Utilities.computeHmacSha256Signature(data, secret);
     const expectedSigB64 = Utilities.base64EncodeWebSafe(expectedSigBytes).replace(/=+$/, "");
-    if (signatureB64 !== expectedSigB64) return false;
+    if (signatureB64 !== expectedSigB64) return { isVerified: false, username: "" };
 
-    // ペイロードを復号して有効期限チェック
-    if (payloadB64 === undefined) return false;
     const payloadJson = Utilities.newBlob(Utilities.base64DecodeWebSafe(payloadB64)).getDataAsString();
     const payload = JSON.parse(payloadJson);
 
     const nowSec = Math.floor(Date.now() / 1000);
-    if (payload.exp && nowSec > payload.exp) {
-        return false; // 期限切れ
-    }
+    if (payload.exp && nowSec > payload.exp) return { isVerified: false, username: "" };
 
-    return true;
+    return { isVerified: true, username: payload.username };
 }
 
 function hashPassword(plainPassword: string, plainSalt: string): string {
@@ -244,7 +300,6 @@ function hashPassword(plainPassword: string, plainSalt: string): string {
 }
 
 function searchRowIndexOfMatchedRoamBird(uuid: string, stageIndex: number): number {
-    const array = [uuid, stageIndex];
     const ss = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!ss) return -1;
 
@@ -254,8 +309,8 @@ function searchRowIndexOfMatchedRoamBird(uuid: string, stageIndex: number): numb
     const range = ss.getRange(2, 1, lastRow - 1, 2);
     if (range === null) return -1;
     const uuidAndStageIndex: (string | number)[][] = range.getValues();
-    let rowIndex = 0;
 
+    let rowIndex = 0;
     for (const storedUuidAndStageIndex of uuidAndStageIndex) {
         if (storedUuidAndStageIndex[0] === uuid && storedUuidAndStageIndex[1] === stageIndex)
             return rowIndex + 1;
