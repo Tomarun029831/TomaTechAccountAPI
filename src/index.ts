@@ -1,4 +1,7 @@
-const PEPPER = PropertiesService.getScriptProperties().getProperty("PEPPER");
+const pepper = PropertiesService.getScriptProperties().getProperty("PEPPER");
+if (pepper === null)
+    throw new Error("PEPPER is not set in ScriptProperties");
+const PEPPER: string = pepper;
 const ACCOUNT_INFO_LEN = 4;
 
 /**
@@ -20,7 +23,7 @@ GASのCacheServiceを使い、ユーザーごと・IPごとにAPIコール回数
 一定期間にアクセス回数を超えたら拒否する制御を入れる
 */
 
-function doPost(e: { parameter: { mode: any; accountData: { username: any; password: any; }; }; headers: { [x: string]: any; }; body: any; }): GoogleAppsScript.Content.TextOutput {
+function doPost(e: { parameter: { mode: string; accountData: { username: string; password: string; }; }; headers: { [x: string]: any; }; body: any; }): GoogleAppsScript.Content.TextOutput {
     const mode = e.parameter.mode;
     const plainUsername = e.parameter.accountData.username;
     const plainPassword = e.parameter.accountData.password;
@@ -47,11 +50,11 @@ function doPost(e: { parameter: { mode: any; accountData: { username: any; passw
 
     logAccess(mode, plainUsername, result);
 
-    const responseJSON = JSON.stringify({ message: "post API", result: result });
+    const responseJSON = JSON.stringify({ message: "post API", result: result ? "success" : "failed" });
     return ContentService.createTextOutput(responseJSON).setMimeType(ContentService.MimeType.JSON);
 }
 
-function logAccess /**: void*/(mode: string, username: string, result: boolean): void {
+function logAccess(mode: string, username: string, result: boolean): void {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName("Log");
 
@@ -73,7 +76,7 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     if (plainUsername == null || plainPassword == null) { throw new ReferenceError("user_name or password is null or undefined"); }
 
     const foundRow = searchRowIndexOfMatchedAccount(plainUsername);
-    if (foundRow !== -1) { return false; }
+    if (foundRow !== -1) return false;
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName("Account");
@@ -85,11 +88,11 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     const lastRow = sheet.getLastRow() + 1;
     const range = sheet.getRange(lastRow, 1, 1, ACCOUNT_INFO_LEN);
 
-    const Uuid = Utilities.getUuid();
-    const salt = Utilities.getUuid();
-    const authenticPassword = hashPassword(plainPassword, salt);
+    const generatedUuid = Utilities.getUuid();
+    const generatedSalt = Utilities.getUuid();
+    const authenticPassword = hashPassword(plainPassword, generatedSalt);
 
-    const accountInfo = [[Uuid, plainUsername, authenticPassword, salt]];
+    const accountInfo = [[generatedUuid, plainUsername, authenticPassword, generatedSalt]];
     range.setValues(accountInfo)
 
     return true;
@@ -116,34 +119,32 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 }
 
 function pullTrackedData(token: string): boolean {
-    if (!verifyToken(token)) {
-        throw new Error("Invalid or expired token");
-    }
+    console.log("pullTrackedData called with " + token);
+    if (!verifyToken(token)) return false;
+
     // TODO: implement
 
     return false;
 }
-
 
 function pushTrackedData(token: string, trackedData: string): boolean {
     console.log("pushTrackedData called with token: " + token + " trackedData " + trackedData);
-    if (!verifyToken(token)) {
-        throw new Error("Invalid or expired token");
-    }
+    if (!verifyToken(token)) return false;
+
     // TODO: implement
 
     return false;
-}
-
-function hashPassword(plainPassword: string, plain_salt: string): string {
-    const concatnated = plainPassword + plain_salt + PEPPER;
-    const rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, concatnated);
-    return rawHash.map(b => ('0' + (b & 0xFF).toString(16)).slice(-2)).join('');
 }
 
 function verifyToken(token: string): boolean {
     console.log("verifyToken called with " + token);
     return false;
+}
+
+function hashPassword(plainPassword: string, plainSalt: string): string {
+    const concatnated = plainPassword + plainSalt + PEPPER;
+    const rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, concatnated); // HACK: be more secure
+    return rawHash.map(b => ('0' + (b & 0xFF).toString(16)).slice(-2)).join('');
 }
 
 function searchRowIndexOfMatchedAccount(username: string): number {
@@ -155,23 +156,24 @@ function searchRowIndexOfMatchedAccount(username: string): number {
     return (index === -1 && index <= 1) ? -1 : index + 1;
 }
 
-/**
-function initAllProperties(){
-  PropertiesService.getScriptProperties().deleteAllProperties();
-  initPepper();
+
+/* PEPPER
+function initAllProperties(): void {
+    PropertiesService.getScriptProperties().deleteAllProperties();
+    initPepper();
 }
 
-function deletePepper(){
-  PropertiesService.getScriptProperties().deleteProperty(PEPPER);
+function deletePepper(): void {
+    PropertiesService.getScriptProperties().deleteProperty(PEPPER);
 }
 
-function printPepper(){
-  const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
-  Logger.log(pepper);
+function printPepper(): void {
+    const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
+    Logger.log(pepper);
 }
 
-function initPepper(){
-  const pair = {PEPPER:Utilities.getUuid()};
-  PropertiesService.getScriptProperties().setProperties(pair);
+function initPepper(): void {
+    const pair = { PEPPER: Utilities.getUuid() };
+    PropertiesService.getScriptProperties().setProperties(pair);
 }
 */
