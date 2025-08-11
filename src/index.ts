@@ -201,14 +201,9 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: stri
         };
     });
 
-    const result = {
-        trackingDatas: trackingDatas
-    };
-    console.log(result);
+    console.log(trackingDatas);
 
-    // TODO: implement
-
-    return { isSuccess: true, trackedData: /*range.toString()*/ "" };
+    return { isSuccess: true, trackedData: String(trackingDatas) };
 }
 
 /*
