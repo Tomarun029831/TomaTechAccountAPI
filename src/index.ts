@@ -179,15 +179,32 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 
 function pullTrackedData(token: string): { isSuccess: boolean, trackedData: string } {
     console.log("pullTrackedData called with " + token);
-    if (!verifyToken(token)) return { isSuccess: false, trackedData: "" };
+    const { isVerified, username } = verifyToken(token);
+    if (!isVerified) return { isSuccess: false, trackedData: "" };
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
-    if (!sheet) {
-        sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
-        sheet.appendRow(["Username", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
-    }
-    // const range = sheet.getRange(fonudRow, 1, 1, ROAMBIRD_INFO_LEN).getValues().flat();
+    if (!sheet) return { isSuccess: false, trackedData: "" };
+    const data = sheet.getDataRange().getValues();
+    const rowsByUsername = data.filter(row => row[0] === username);
+    console.log(rowsByUsername);
+
+    const trackingDatas: TrackData = { trackingDatas: {} };
+
+    rowsByUsername.forEach(row => {
+        const stageIndex = String(row[1]); // キーは文字列化
+        trackingDatas.trackingDatas[stageIndex] = {
+            totalTimer: row[2],
+            timerPerStage: row[3],
+            totalGoalCounter: Number(row[4]),
+            streakGoalCounter: Number(row[5])
+        };
+    });
+
+    const result = {
+        trackingDatas: trackingDatas
+    };
+    console.log(result);
 
     // TODO: implement
 
