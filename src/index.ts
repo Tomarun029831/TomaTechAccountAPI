@@ -333,27 +333,6 @@ function hashPassword(plainPassword: string, plainSalt: string): string {
     return rawHash.map(b => ('0' + (b & 0xFF).toString(16)).slice(-2)).join('');
 }
 
-function searchRowIndexOfMatchedRoamBird(uuid: string, stageIndex: number): number {
-    const ss = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ROAMBIRD_SHEET_NAME);
-    if (!ss) return -1;
-
-    const lastRow = ss.getLastRow();
-    if (lastRow < 2) return -1;
-
-    const range = ss.getRange(2, 1, lastRow - 1, 2);
-    if (range === null) return -1;
-    const uuidAndStageIndex: (string | number)[][] = range.getValues();
-
-    let rowIndex = 0;
-    for (const storedUuidAndStageIndex of uuidAndStageIndex) {
-        if (storedUuidAndStageIndex[0] === uuid && storedUuidAndStageIndex[1] === stageIndex)
-            return rowIndex + 1;
-        rowIndex++;
-    }
-
-    return -1;
-}
-
 function searchRowIndexOfMatchedAccount(username: string): number {
     const ss = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ACCOUNT_SHEET_NAME);
     if (!ss) return -1;
