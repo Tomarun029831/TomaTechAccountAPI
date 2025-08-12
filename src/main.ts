@@ -3,7 +3,7 @@ const PEPPER = (() => {
     if (!v) throw new Error("PEPPER is not set");
     return v;
 })();
-const ACCOUNT_INFO_LEN = 4;
+const ACCOUNT_INFO_LEN = 3;
 const ROAMBIRD_INFO_LEN = 6;
 const ACCOUNT_SHEET_NAME = "Account";
 const ROAMBIRD_SHEET_NAME = "RoamBird";
@@ -46,7 +46,6 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     }
     const mode = body.mode as string
     const plainToken = body.token as string;
-
 
     switch (mode) {
         case "CREATE":
@@ -109,17 +108,15 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     let sheet = ss.getSheetByName(ACCOUNT_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ACCOUNT_SHEET_NAME);
-        sheet.appendRow(["Username", "Password", "Salt", "Token"]);
+        sheet.appendRow(["Username", "Password", "Salt"]);
     }
-
     const lastRow = sheet.getLastRow() + 1;
     const range = sheet.getRange(lastRow, 1, 1, ACCOUNT_INFO_LEN);
 
     const generatedSalt = Utilities.getUuid();
     const authenticPassword = hashPassword(plainPassword, generatedSalt);
-    const generatedToken = generateToken(plainUsername);
 
-    const accountInfo = [[plainUsername, authenticPassword, generatedSalt, generatedToken]];
+    const accountInfo = [[plainUsername, authenticPassword, generatedSalt]];
     range.setValues(accountInfo)
 
     return true;
@@ -135,7 +132,7 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
     let sheet = ss.getSheetByName(ACCOUNT_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ACCOUNT_SHEET_NAME);
-        sheet.appendRow(["Username", "Password", "Salt", "Token"]);
+        sheet.appendRow(["Username", "Password", "Salt"]);
     }
     const range = sheet.getRange(fonudRow, 1, 1, ACCOUNT_INFO_LEN);
     const values = range.getValues().flat();
@@ -143,14 +140,8 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
     const storedPassword = values[1];
     const storedSalt = values[2];
     const authenticPassword = hashPassword(plainPassword, storedSalt);
-    const generatedToken = generateToken(plainUsername);
 
-    const isSuccess = authenticPassword === storedPassword;
-    if (isSuccess) {
-        const accountInfo = [[plainUsername, authenticPassword, storedSalt, generatedToken]];
-        range.setValues(accountInfo)
-    }
-
+    const isSuccess: boolean = (authenticPassword === storedPassword);
     return isSuccess;
 }
 
@@ -340,12 +331,12 @@ function searchRowIndexOfMatchedAccount(username: string): number {
     const lastRow = ss.getLastRow();
     if (lastRow < 2) return -1; // No Data
 
-    const range = ss.getRange(2, 2, lastRow - 1, 1); // Get Username Column
+    const range = ss.getRange(2, 1, lastRow - 1, 1); // Get Username Column
     if (range === null) return -1;
     const usernames = range.getValues().flat();
 
     const index = usernames.findIndex(name => name === username);
-    return (index === -1) ? -1 : index + 1;
+    return (index === -1) ? -1 : index + 2;
 }
 
 
