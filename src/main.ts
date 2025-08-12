@@ -34,7 +34,7 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
 
 function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.TextOutput {
     let result: boolean = false;
-    let payload: string = "";
+    let payload: object = {};
     let plainUsername: string = "";
     let plainPassword: string = "";
 
@@ -52,14 +52,14 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             result = createNewAccount(plainUsername, plainPassword);
-            if (result) payload = generateToken(plainUsername);
+            if (result) payload = { token: generateToken(plainUsername) };
             break;
 
         case "AUTHENTICATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             result = authenticateAccount(plainUsername, plainPassword);
-            if (result) payload = generateToken(plainUsername);
+            if (result) payload = { token: generateToken(plainUsername) };
             break;
 
         case "PUSH":
@@ -70,13 +70,13 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
         case "PULL":
             ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainToken));
             break;
+
         default:
             break;
     }
 
     logAccess(mode, plainUsername, result);
-
-    let responseObj: { result: string, payload: string } = { result: result ? "success" : "failed", payload: payload };
+    let responseObj: { result: string, payload: object } = { result: result ? "success" : "failed", payload: payload };
     return sendJSON(responseObj);
 }
 
@@ -167,14 +167,14 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 
 */
 
-function pullTrackedData(token: string): { isSuccess: boolean, trackedData: string } {
+function pullTrackedData(token: string): { isSuccess: boolean, trackedData: object } {
     console.log("pullTrackedData called with " + token);
     const { isVerified, username } = verifyToken(token);
-    if (!isVerified) return { isSuccess: false, trackedData: "" };
+    if (!isVerified) return { isSuccess: false, trackedData: {} };
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
-    if (!sheet) return { isSuccess: false, trackedData: "" };
+    if (!sheet) return { isSuccess: false, trackedData: {} };
     const data = sheet.getDataRange().getValues();
     const rowsByUsername = data.filter(row => row[0] === username);
     console.log(rowsByUsername);
@@ -191,9 +191,7 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: stri
         };
     });
 
-    console.log(storedTrackedDatas);
-
-    return { isSuccess: true, trackedData: JSON.stringify(storedTrackedDatas) };
+    return { isSuccess: true, trackedData: storedTrackedDatas };
 }
 
 /*
