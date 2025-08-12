@@ -1,6 +1,11 @@
 const PEPPER = (() => {
     const v = PropertiesService.getScriptProperties().getProperty("PEPPER");
-    if (!v) throw new Error("PEPPER is not set");
+    if (!v) {
+        initPepper();
+        const v = PropertiesService.getScriptProperties().getProperty("PEPPER");
+        if (!v) throw new Error("PEPPER is not set.");
+        return v;
+    }
     return v;
 })();
 const ACCOUNT_INFO_LEN = 3;
@@ -14,15 +19,13 @@ type AccountInfo = {
 };
 
 type StageData = {
-    totalTimer: string;          // TimeSpan → JSONでは文字列
-    timerPerStage: string;       // 同上
-    totalGoalCounter: number;    // uint → number
-    streakGoalCounter: number;   // uint → number
+    totalTimer: string;
+    timerPerStage: string;
+    totalGoalCounter: number;
+    streakGoalCounter: number;
 };
 
-type TrackData = {
-    [key: string]: StageData; // uintキーはJSONでstring化される
-};
+type TrackData = { [key: string]: StageData; };
 
 function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
     return ContentService
@@ -175,28 +178,6 @@ function pullTrackedData(username: string): { isSuccess: boolean, trackedData: o
     return { isSuccess: true, trackedData: storedTrackedDatas };
 }
 
-/*
-{
-  "mode": "PUSH",
-  "token": sometoken
-  "trackingDatas": {
-    "1": {
-      "totalTimer": "00:00:00",
-      "timerPerStage": "10675199.02:48:05.4775807",
-      "totalGoalCounter": 0,
-      "streakGoalCounter": 0
-    },
-    "2": {
-      "totalTimer": "00:05:23.4560000",
-      "timerPerStage": "00:01:00",
-      "totalGoalCounter": 5,
-      "streakGoalCounter": 3
-    }
-  }
-}
-
-*/
-
 function pushTrackedData(username: string, trackedData: TrackData): boolean {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
@@ -310,24 +291,22 @@ function searchRowIndexOfMatchedAccount(username: string): number {
     return (index === -1) ? -1 : index + 2;
 }
 
-
-/* PEPPER
-function initAllProperties(): void {
-    PropertiesService.getScriptProperties().deleteAllProperties();
-    initPepper();
-}
+// function initAllProperties(): void {
+//     PropertiesService.getScriptProperties().deleteAllProperties();
+//     initPepper();
+// }
 
 function deletePepper(): void {
-    PropertiesService.getScriptProperties().deleteProperty(PEPPER);
+    PropertiesService.getScriptProperties().deleteProperty("PEPPER");
 }
 
-function printPepper(): void {
-    const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
-    Logger.log(pepper);
-}
+// function printPepper(): void {
+//     const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
+//     Logger.log(pepper);
+// }
 
 function initPepper(): void {
+    deletePepper();
     const pair = { PEPPER: Utilities.getUuid() };
     PropertiesService.getScriptProperties().setProperties(pair);
 }
-*/
