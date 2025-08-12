@@ -32,7 +32,7 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
 
 function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.TextOutput {
     let result: boolean = false;
-    let payload: object = {};
+    let payload: object | string = {};
     let plainUsername: string = "";
     let plainPassword: string = "";
 
@@ -50,14 +50,14 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             result = createNewAccount(plainUsername, plainPassword);
-            if (result) payload = { token: generateToken(plainUsername) };
+            if (result) payload = generateToken(plainUsername);
             break;
 
         case "AUTHENTICATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             result = authenticateAccount(plainUsername, plainPassword);
-            if (result) payload = { token: generateToken(plainUsername) };
+            if (result) payload = generateToken(plainUsername);
             break;
 
         case "PUSH":
@@ -77,7 +77,7 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     }
 
     logAccess(mode, plainUsername, result);
-    let responseObj: { result: string, payload: object } = { result: result ? "success" : "failed", payload: payload };
+    let responseObj: { result: "success" | "failed", payload: object | string } = { result: result ? "success" : "failed", payload: payload };
     return sendJSON(responseObj);
 }
 
