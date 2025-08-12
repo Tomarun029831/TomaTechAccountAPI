@@ -1,4 +1,5 @@
 .clasp.json
+build/
 
 # Logs
 logs
