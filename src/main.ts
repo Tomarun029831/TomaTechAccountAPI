@@ -167,8 +167,14 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 
 */
 
+function formatTime(dateObj: Date): string {
+    const h = dateObj.getHours().toString().padStart(2, '0');
+    const m = dateObj.getMinutes().toString().padStart(2, '0');
+    const s = dateObj.getSeconds().toString().padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
 function pullTrackedData(token: string): { isSuccess: boolean, trackedData: object } {
-    console.log("pullTrackedData called with " + token);
     const { isVerified, username } = verifyToken(token);
     if (!isVerified) return { isSuccess: false, trackedData: {} };
 
@@ -177,15 +183,14 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: obje
     if (!sheet) return { isSuccess: false, trackedData: {} };
     const data = sheet.getDataRange().getValues();
     const rowsByUsername = data.filter(row => row[0] === username);
-    console.log(rowsByUsername);
 
     const storedTrackedDatas: TrackData = { trackingDatas: {} };
 
     rowsByUsername.forEach(row => {
-        const stageIndex = String(row[1]); // キーは文字列化
+        const stageIndex = String(row[1]);
         storedTrackedDatas.trackingDatas[stageIndex] = {
-            totalTimer: row[2],
-            timerPerStage: row[3],
+            totalTimer: formatTime(row[2]),
+            timerPerStage: formatTime(row[3]),
             totalGoalCounter: Number(row[4]),
             streakGoalCounter: Number(row[5])
         };
