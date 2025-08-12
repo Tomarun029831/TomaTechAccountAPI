@@ -21,9 +21,7 @@ type StageData = {
 };
 
 type TrackData = {
-    trackingDatas: {
-        [key: string]: StageData; // uintキーはJSONでstring化される
-    };
+    [key: string]: StageData; // uintキーはJSONでstring化される
 };
 
 function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
@@ -63,14 +61,17 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             break;
 
         case "PUSH":
+            ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
+            if (!result) break;
             const trackedData: TrackData = body.trackingDatas as TrackData;
-            result = pushTrackedData(plainToken, trackedData);
+            result = pushTrackedData(plainUsername, trackedData);
             break;
 
         case "PULL":
-            ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainToken));
+            ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
+            if (!result) break;
+            ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainUsername));
             break;
-
         default:
             break;
     }
@@ -145,28 +146,6 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
     return isSuccess;
 }
 
-/*
-
-{
-  "mode": "PUSH",
-  "trackingDatas": {
-    "1": {
-      "totalTimer": "00:00:00",
-      "timerPerStage": "10675199.02:48:05.4775807",
-      "totalGoalCounter": 0,
-      "streakGoalCounter": 0
-    },
-    "2": {
-      "totalTimer": "00:05:23.4560000",
-      "timerPerStage": "00:01:00",
-      "totalGoalCounter": 5,
-      "streakGoalCounter": 3
-    }
-  }
-}
-
-*/
-
 function formatTime(dateObj: Date): string {
     const h = dateObj.getHours().toString().padStart(2, '0');
     const m = dateObj.getMinutes().toString().padStart(2, '0');
@@ -174,21 +153,18 @@ function formatTime(dateObj: Date): string {
     return `${h}:${m}:${s}`;
 }
 
-function pullTrackedData(token: string): { isSuccess: boolean, trackedData: object } {
-    const { isVerified, username } = verifyToken(token);
-    if (!isVerified) return { isSuccess: false, trackedData: {} };
-
+function pullTrackedData(username: string): { isSuccess: boolean, trackedData: object } {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!sheet) return { isSuccess: false, trackedData: {} };
     const data = sheet.getDataRange().getValues();
     const rowsByUsername = data.filter(row => row[0] === username);
 
-    const storedTrackedDatas: TrackData = { trackingDatas: {} };
+    const storedTrackedDatas: TrackData = {};
 
     rowsByUsername.forEach(row => {
         const stageIndex = String(row[1]);
-        storedTrackedDatas.trackingDatas[stageIndex] = {
+        storedTrackedDatas[stageIndex] = {
             totalTimer: formatTime(row[2]),
             timerPerStage: formatTime(row[3]),
             totalGoalCounter: Number(row[4]),
@@ -221,19 +197,13 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: obje
 
 */
 
-
-function pushTrackedData(token: string, trackedData: TrackData): boolean {
-    console.log(`pushTrackedData called with token: ${token} trackedData: ${JSON.stringify(trackedData)}`);
-
-    const { isVerified, username } = verifyToken(token);
-    if (!isVerified) return false;
-
+function pushTrackedData(username: string, trackedData: TrackData): boolean {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
         sheet.appendRow([
-            "username",
+            "Username",
             "StageIndex",
             "TotalTime",
             "ShortestTime",
@@ -243,21 +213,19 @@ function pushTrackedData(token: string, trackedData: TrackData): boolean {
     }
 
     const data = sheet.getDataRange().getValues();
-
     data.forEach((row, idx) => {
         if (row[0] === username) {
             // rowIndex is 1-based
             const stageIndex = String(row[1]);
-            const trackData = trackedData.trackingDatas[stageIndex];
+            const trackData = trackedData[stageIndex];
             const newValues = [[
-                stageIndex,
                 trackData?.totalTimer,
                 trackData?.timerPerStage,
                 trackData?.totalGoalCounter,
                 trackData?.streakGoalCounter
             ]];
 
-            sheet.getRange(idx + 1, 2, 1, ROAMBIRD_INFO_LEN - 1).setValues(newValues);
+            sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
         }
     });
 
