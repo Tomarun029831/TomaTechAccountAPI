@@ -176,7 +176,6 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 
 */
 
-
 function pullTrackedData(token: string): { isSuccess: boolean, trackedData: string } {
     console.log("pullTrackedData called with " + token);
     const { isVerified, username } = verifyToken(token);
@@ -189,11 +188,11 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: stri
     const rowsByUsername = data.filter(row => row[0] === username);
     console.log(rowsByUsername);
 
-    const trackingDatas: TrackData = { trackingDatas: {} };
+    const storedTrackedDatas: TrackData = { trackingDatas: {} };
 
     rowsByUsername.forEach(row => {
         const stageIndex = String(row[1]); // キーは文字列化
-        trackingDatas.trackingDatas[stageIndex] = {
+        storedTrackedDatas.trackingDatas[stageIndex] = {
             totalTimer: row[2],
             timerPerStage: row[3],
             totalGoalCounter: Number(row[4]),
@@ -201,9 +200,9 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: stri
         };
     });
 
-    console.log(trackingDatas);
+    console.log(storedTrackedDatas);
 
-    return { isSuccess: true, trackedData: String(trackingDatas) };
+    return { isSuccess: true, trackedData: JSON.stringify(storedTrackedDatas) };
 }
 
 /*
@@ -228,26 +227,49 @@ function pullTrackedData(token: string): { isSuccess: boolean, trackedData: stri
 
 */
 
+
 function pushTrackedData(token: string, trackedData: TrackData): boolean {
-    console.log("pushTrackedData called with token: " + token + " trackedData: " + trackedData);
+    console.log(`pushTrackedData called with token: ${token} trackedData: ${JSON.stringify(trackedData)}`);
+
     const { isVerified, username } = verifyToken(token);
     if (!isVerified) return false;
-
-    const fonudRow = searchRowIndexOfMatchedRoamBird(trackedData.uuid, trackedData.stageIndex);
-    if (fonudRow === -1) return false;
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
-        sheet.appendRow(["username", "StageIndex", "TotalTime", "ShortestTime", "TotalGoalCount", "StreakGoalCount"]);
+        sheet.appendRow([
+            "username",
+            "StageIndex",
+            "TotalTime",
+            "ShortestTime",
+            "TotalGoalCount",
+            "StreakGoalCount"
+        ]);
     }
-    const range = sheet.getRange(fonudRow, 1, 1, ROAMBIRD_INFO_LEN);
 
-    // TODO: implement
+    const data = sheet.getDataRange().getValues();
+
+    data.forEach((row, idx) => {
+        if (row[0] === username) {
+            // rowIndex is 1-based
+            const stageIndex = String(row[1]);
+            const trackData = trackedData.trackingDatas[stageIndex];
+            const newValues = [[
+                stageIndex,
+                trackData?.totalTimer,
+                trackData?.timerPerStage,
+                trackData?.totalGoalCounter,
+                trackData?.streakGoalCounter
+            ]];
+
+            sheet.getRange(idx + 1, 2, 1, ROAMBIRD_INFO_LEN - 1).setValues(newValues);
+        }
+    });
 
     return true;
 }
+
 
 function generateToken(username: string): string {
     const token = generateJWT(username, PEPPER, 3600); // available while one hour
