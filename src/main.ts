@@ -33,6 +33,19 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
         .setMimeType(ContentService.MimeType.JSON);
 }
 
+function computeHash(input: string): string {
+    // Utilities.DigestAlgorithm.SHA_256 を指定
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+
+    // byte 配列を16進数文字列に変換
+    var hex = digest.map(function (byte) {
+        var v = (byte < 0 ? byte + 256 : byte).toString(16);
+        return v.length == 1 ? "0" + v : v;
+    }).join("");
+
+    return hex.toLowerCase();
+}
+
 function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.TextOutput {
     let result: boolean = false;
     let payload: object | string = {};
@@ -47,11 +60,13 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     }
     const mode = body.mode as string
     const plainToken = body.token as string;
+    const checksum = body.checksum as string;
 
     switch (mode) {
         case "CREATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
+            if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
             result = createNewAccount(plainUsername, plainPassword);
             if (result) payload = generateToken(plainUsername);
             break;
@@ -59,11 +74,13 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
         case "AUTHENTICATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
+            if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
             result = authenticateAccount(plainUsername, plainPassword);
             if (result) payload = generateToken(plainUsername);
             break;
 
         case "PUSH":
+            if (computeHash(mode + plainToken + JSON.stringify(body.trackingDatas)) !== checksum) break;
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
             const trackedData: TrackData = body.trackingDatas as TrackData;
@@ -71,6 +88,7 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             break;
 
         case "PULL":
+            if (computeHash(mode + plainToken) !== checksum) break;
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
             ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainUsername));
@@ -168,8 +186,8 @@ function pullTrackedData(username: string): { isSuccess: boolean, trackedData: o
     rowsByUsername.forEach(row => {
         const stageIndex = String(row[1]);
         storedTrackedDatas[stageIndex] = {
-            totalTimer: formatTime(row[2]),
-            timerPerStage: formatTime(row[3]),
+            totalTimer: row[2],
+            timerPerStage: row[3],
             totalGoalCounter: Number(row[4]),
             streakGoalCounter: Number(row[5])
         };
