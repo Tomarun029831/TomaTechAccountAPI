@@ -1,6 +1,11 @@
 const PEPPER = (() => {
     const v = PropertiesService.getScriptProperties().getProperty("PEPPER");
-    if (!v) throw new Error("PEPPER is not set");
+    if (!v) {
+        initPepper();
+        const v = PropertiesService.getScriptProperties().getProperty("PEPPER");
+        if (!v) throw new Error("PEPPER is not set.");
+        return v;
+    }
     return v;
 })();
 const ACCOUNT_INFO_LEN = 3;
@@ -14,15 +19,13 @@ type AccountInfo = {
 };
 
 type StageData = {
-    totalTimer: string;          // TimeSpan → JSONでは文字列
-    timerPerStage: string;       // 同上
-    totalGoalCounter: number;    // uint → number
-    streakGoalCounter: number;   // uint → number
+    totalTimer: string;
+    timerPerStage: string;
+    totalGoalCounter: number;
+    streakGoalCounter: number;
 };
 
-type TrackData = {
-    [key: string]: StageData; // uintキーはJSONでstring化される
-};
+type TrackData = { [key: string]: StageData; };
 
 function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
     return ContentService
@@ -30,9 +33,22 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
         .setMimeType(ContentService.MimeType.JSON);
 }
 
+function computeHash(input: string): string {
+    // Utilities.DigestAlgorithm.SHA_256 を指定
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+
+    // byte 配列を16進数文字列に変換
+    var hex = digest.map(function (byte) {
+        var v = (byte < 0 ? byte + 256 : byte).toString(16);
+        return v.length == 1 ? "0" + v : v;
+    }).join("");
+
+    return hex.toLowerCase();
+}
+
 function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.TextOutput {
     let result: boolean = false;
-    let payload: object = {};
+    let payload: object | string = {};
     let plainUsername: string = "";
     let plainPassword: string = "";
 
@@ -44,23 +60,27 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     }
     const mode = body.mode as string
     const plainToken = body.token as string;
+    const checksum = body.checksum as string;
 
     switch (mode) {
         case "CREATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
+            if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
             result = createNewAccount(plainUsername, plainPassword);
-            if (result) payload = { token: generateToken(plainUsername) };
+            if (result) payload = generateToken(plainUsername);
             break;
 
         case "AUTHENTICATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
+            if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
             result = authenticateAccount(plainUsername, plainPassword);
-            if (result) payload = { token: generateToken(plainUsername) };
+            if (result) payload = generateToken(plainUsername);
             break;
 
         case "PUSH":
+            if (computeHash(mode + plainToken + JSON.stringify(body.trackingDatas)) !== checksum) break;
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
             const trackedData: TrackData = body.trackingDatas as TrackData;
@@ -68,6 +88,7 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             break;
 
         case "PULL":
+            if (computeHash(mode + plainToken) !== checksum) break;
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
             ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainUsername));
@@ -77,7 +98,7 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     }
 
     logAccess(mode, plainUsername, result);
-    let responseObj: { result: string, payload: object } = { result: result ? "success" : "failed", payload: payload };
+    let responseObj: { result: "success" | "failed", payload: object | string } = { result: result ? "success" : "failed", payload: payload };
     return sendJSON(responseObj);
 }
 
@@ -118,6 +139,7 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     const authenticPassword = hashPassword(plainPassword, generatedSalt);
 
     const accountInfo = [[plainUsername, authenticPassword, generatedSalt]];
+    range.setNumberFormat("@STRING@");
     range.setValues(accountInfo)
 
     return true;
@@ -146,13 +168,6 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
     return isSuccess;
 }
 
-function formatTime(dateObj: Date): string {
-    const h = dateObj.getHours().toString().padStart(2, '0');
-    const m = dateObj.getMinutes().toString().padStart(2, '0');
-    const s = dateObj.getSeconds().toString().padStart(2, '0');
-    return `${h}:${m}:${s}`;
-}
-
 function pullTrackedData(username: string): { isSuccess: boolean, trackedData: object } {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
@@ -165,8 +180,8 @@ function pullTrackedData(username: string): { isSuccess: boolean, trackedData: o
     rowsByUsername.forEach(row => {
         const stageIndex = String(row[1]);
         storedTrackedDatas[stageIndex] = {
-            totalTimer: formatTime(row[2]),
-            timerPerStage: formatTime(row[3]),
+            totalTimer: row[2],
+            timerPerStage: row[3],
             totalGoalCounter: Number(row[4]),
             streakGoalCounter: Number(row[5])
         };
@@ -175,31 +190,10 @@ function pullTrackedData(username: string): { isSuccess: boolean, trackedData: o
     return { isSuccess: true, trackedData: storedTrackedDatas };
 }
 
-/*
-{
-  "mode": "PUSH",
-  "token": sometoken
-  "trackingDatas": {
-    "1": {
-      "totalTimer": "00:00:00",
-      "timerPerStage": "10675199.02:48:05.4775807",
-      "totalGoalCounter": 0,
-      "streakGoalCounter": 0
-    },
-    "2": {
-      "totalTimer": "00:05:23.4560000",
-      "timerPerStage": "00:01:00",
-      "totalGoalCounter": 5,
-      "streakGoalCounter": 3
-    }
-  }
-}
-
-*/
-
 function pushTrackedData(username: string, trackedData: TrackData): boolean {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
+
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
         sheet.appendRow([
@@ -210,28 +204,52 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
             "TotalGoalCount",
             "StreakGoalCount"
         ]);
+        sheet.getRange(1, 1, 1, ROAMBIRD_INFO_LEN).setNumberFormat("@STRING@");
     }
 
-    const data = sheet.getDataRange().getValues();
-    data.forEach((row, idx) => {
-        if (row[0] === username) {
-            // rowIndex is 1-based
-            const stageIndex = String(row[1]);
-            const trackData = trackedData[stageIndex];
-            const newValues = [[
-                trackData?.totalTimer,
-                trackData?.timerPerStage,
-                trackData?.totalGoalCounter,
-                trackData?.streakGoalCounter
-            ]];
+    const data: any[][] = sheet.getDataRange().getValues();
+    const stageIndexes = Object.keys(trackedData);
 
-            sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
+    stageIndexes.forEach(stageIndex => {
+        const trackData = trackedData[stageIndex];
+        let rowFound = false;
+
+        for (let idx = 0; idx < data.length; idx++) {
+            const row = data[idx];
+            if (!row) continue; // 安全確認
+            if (row[0] === username && String(row[1]) === stageIndex) {
+                const range = sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2);
+                range.setNumberFormat("@STRING@");
+                range.setValues([[
+                    String(trackData?.totalTimer),
+                    String(trackData?.timerPerStage),
+                    String(trackData?.totalGoalCounter),
+                    String(trackData?.streakGoalCounter)
+                ]]);
+                rowFound = true;
+                break;
+            }
+        }
+
+        if (!rowFound) {
+            const lastRow = sheet.getLastRow() + 1;
+            const range = sheet.getRange(lastRow, 1, 1, ROAMBIRD_INFO_LEN);
+
+            range.setNumberFormat('@STRING@');
+            range.setValues([[
+                String(username),
+                String(stageIndex),
+                String(trackData?.totalTimer),
+                String(trackData?.timerPerStage),
+                String(trackData?.totalGoalCounter),
+                String(trackData?.streakGoalCounter)
+            ]]);
+
         }
     });
 
     return true;
 }
-
 
 function generateToken(username: string): string {
     const token = generateJWT(username, PEPPER, 3600); // available while one hour
@@ -310,24 +328,22 @@ function searchRowIndexOfMatchedAccount(username: string): number {
     return (index === -1) ? -1 : index + 2;
 }
 
-
-/* PEPPER
-function initAllProperties(): void {
-    PropertiesService.getScriptProperties().deleteAllProperties();
-    initPepper();
-}
+// function initAllProperties(): void {
+//     PropertiesService.getScriptProperties().deleteAllProperties();
+//     initPepper();
+// }
 
 function deletePepper(): void {
-    PropertiesService.getScriptProperties().deleteProperty(PEPPER);
+    PropertiesService.getScriptProperties().deleteProperty("PEPPER");
 }
 
-function printPepper(): void {
-    const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
-    Logger.log(pepper);
-}
+// function printPepper(): void {
+//     const pepper = PropertiesService.getScriptProperties().getProperty(PEPPER);
+//     Logger.log(pepper);
+// }
 
 function initPepper(): void {
+    deletePepper();
     const pair = { PEPPER: Utilities.getUuid() };
     PropertiesService.getScriptProperties().setProperties(pair);
 }
-*/
