@@ -13,6 +13,9 @@ const ROAMBIRD_INFO_LEN = 6;
 const ACCOUNT_SHEET_NAME = "Account";
 const ROAMBIRD_SHEET_NAME = "RoamBird";
 
+const LOCK_TIMEOUT_MS = 30000; // 30秒でタイムアウト
+const RETRY_DELAY_MS = 100;    // リトライ間隔
+
 type AccountInfo = {
     username: string, // username is unique in TomaTechDatabase
     password: string
@@ -27,6 +30,37 @@ type StageData = {
 
 type TrackData = { [key: string]: StageData; };
 
+function acquireLock(lockKey: string): GoogleAppsScript.Lock.Lock | null {
+    const lock = LockService.getScriptLock();
+    try {
+        const acquired = lock.tryLock(LOCK_TIMEOUT_MS);
+        if (acquired) {
+            return lock;
+        }
+        console.warn(`Failed to acquire lock for: ${lockKey}`);
+        return null;
+    } catch (error) {
+        console.error(`Error acquiring lock for ${lockKey}:`, error);
+        return null;
+    }
+}
+
+function executeWithLock<T>(lockKey: string, operation: () => T): T | null {
+    const lock = acquireLock(lockKey);
+    if (!lock) {
+        return null;
+    }
+
+    try {
+        return operation();
+    } catch (error) {
+        console.error(`Error during locked operation ${lockKey}:`, error);
+        throw error;
+    } finally {
+        lock.releaseLock();
+    }
+}
+
 function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
     return ContentService
         .createTextOutput(JSON.stringify(obj))
@@ -34,10 +68,7 @@ function sendJSON(obj: any): GoogleAppsScript.Content.TextOutput {
 }
 
 function computeHash(input: string): string {
-    // Utilities.DigestAlgorithm.SHA_256 を指定
     var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
-
-    // byte 配列を16進数文字列に変換
     var hex = digest.map(function (byte) {
         var v = (byte < 0 ? byte + 256 : byte).toString(16);
         return v.length == 1 ? "0" + v : v;
@@ -67,16 +98,33 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
-            result = createNewAccount(plainUsername, plainPassword);
-            if (result) payload = generateToken(plainUsername);
+
+            const createResult = executeWithLock(`sheet_lock_${ACCOUNT_SHEET_NAME}`, () => {
+                return createNewAccount(plainUsername, plainPassword);
+            });
+            if (createResult === null) {
+                result = false;
+                payload = "Account creation timeout or error";
+            } else {
+                result = createResult;
+                if (result) payload = generateToken(plainUsername);
+            }
             break;
 
         case "AUTHENTICATE":
             plainUsername = body.username as string;
             plainPassword = body.password as string;
             if (computeHash(mode + plainUsername + plainPassword) !== checksum) break;
-            result = authenticateAccount(plainUsername, plainPassword);
-            if (result) payload = generateToken(plainUsername);
+            // PERF:
+            const authResult = executeWithLock(`sheet_lock_${ACCOUNT_SHEET_NAME}`, () => {
+                return authenticateAccount(plainUsername, plainPassword);
+            });
+            if (authResult === null) {
+                result = false;
+            } else {
+                result = authResult;
+                if (result) payload = generateToken(plainUsername);
+            }
             break;
 
         case "PUSH":
@@ -84,14 +132,31 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
             const trackedData: TrackData = body.trackingDatas as TrackData;
-            result = pushTrackedData(plainUsername, trackedData);
+            const pushResult = executeWithLock(`sheet_lock_${ROAMBIRD_SHEET_NAME}`, () => {
+                return pushTrackedData(plainUsername, trackedData);
+            });
+            if (pushResult === null) {
+                result = false;
+                payload = "Data push timeout or error";
+            } else {
+                result = pushResult;
+            }
             break;
 
         case "PULL":
             if (computeHash(mode + plainToken) !== checksum) break;
             ({ isVerified: result, username: plainUsername } = verifyToken(plainToken));
             if (!result) break;
-            ({ isSuccess: result, trackedData: payload } = pullTrackedData(plainUsername));
+            // PERF:
+            const pullResult = executeWithLock(`sheet_lock_${ROAMBIRD_SHEET_NAME}`, () => {
+                return pullTrackedData(plainUsername);
+            });
+            if (pullResult === null) {
+                result = false;
+                payload = "Data pull timeout or error";
+            } else {
+                ({ isSuccess: result, trackedData: payload } = pullResult);
+            }
             break;
         default:
             break;
@@ -103,21 +168,24 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
 }
 
 function logAccess(mode: string, username: string, result: boolean): void {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName("Log");
+    executeWithLock("sheet_lock_Log", () => {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        let sheet = ss.getSheetByName("Log");
 
-    if (!sheet) {
-        sheet = ss.insertSheet("Log");
-        sheet.appendRow(["Timestamp", "Mode", "Username", "Result"]);
-    }
+        if (!sheet) {
+            sheet = ss.insertSheet("Log");
+            sheet.appendRow(["Timestamp", "Mode", "Username", "Result"]);
+        }
 
-    const now = new Date();
-    sheet.appendRow([
-        now.toLocaleString(),
-        mode,
-        username,
-        result
-    ]);
+        const now = new Date();
+        sheet.appendRow([
+            now.toLocaleString(),
+            mode,
+            username,
+            result
+        ]);
+        return true;
+    });
 }
 
 function createNewAccount(plainUsername: string, plainPassword: string): boolean {
@@ -249,6 +317,72 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
     });
 
     return true;
+}
+
+function batchUpdateTrackedData(username: string, trackedData: TrackData): boolean {
+    return executeWithLock(`batch_update_${username}`, () => {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
+
+        if (!sheet) {
+            sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
+            sheet.appendRow([
+                "Username",
+                "StageIndex",
+                "TotalTime",
+                "ShortestTime",
+                "TotalGoalCount",
+                "StreakGoalCount"
+            ]);
+        }
+
+        const data: string[][] = sheet.getDataRange().getValues();
+        const updates: any[][] = [];
+        const inserts: any[][] = [];
+
+        Object.keys(trackedData).forEach(stageIndex => {
+            const trackData = trackedData[stageIndex];
+            if (!trackData) return; // undefined を無視
+            let found = false;
+            for (let i = 0; i < data.length; i++) {
+                if (data[i]![0] === username && String(data[i]![1]) === stageIndex) {
+                    updates.push([
+                        i + 1,
+                        trackData.totalTimer,
+                        trackData.timerPerStage,
+                        trackData.totalGoalCounter,
+                        trackData.streakGoalCounter
+                    ]);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                inserts.push([
+                    username,
+                    stageIndex,
+                    trackData.totalTimer,
+                    trackData.timerPerStage,
+                    trackData.totalGoalCounter,
+                    trackData.streakGoalCounter
+                ]);
+            }
+        });
+
+        updates.forEach(update => {
+            const rowNum = update[0];
+            const range = sheet.getRange(rowNum, 3, 1, 4);
+            range.setValues([[update[1], update[2], update[3], update[4]]]);
+        });
+
+        if (inserts.length > 0) {
+            const startRow = sheet.getLastRow() + 1;
+            const range = sheet.getRange(startRow, 1, inserts.length, ROAMBIRD_INFO_LEN);
+            range.setValues(inserts);
+        }
+
+        return true;
+    }) ?? false;
 }
 
 function generateToken(username: string): string {
