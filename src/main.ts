@@ -139,6 +139,7 @@ function createNewAccount(plainUsername: string, plainPassword: string): boolean
     const authenticPassword = hashPassword(plainPassword, generatedSalt);
 
     const accountInfo = [[plainUsername, authenticPassword, generatedSalt]];
+    range.setNumberFormat("@STRING@");
     range.setValues(accountInfo)
 
     return true;
@@ -165,13 +166,6 @@ function authenticateAccount(plainUsername: string, plainPassword: string): bool
 
     const isSuccess: boolean = (authenticPassword === storedPassword);
     return isSuccess;
-}
-
-function formatTime(dateObj: Date): string {
-    const h = dateObj.getHours().toString().padStart(2, '0');
-    const m = dateObj.getMinutes().toString().padStart(2, '0');
-    const s = dateObj.getSeconds().toString().padStart(2, '0');
-    return `${h}:${m}:${s}`;
 }
 
 function pullTrackedData(username: string): { isSuccess: boolean, trackedData: object } {
@@ -225,7 +219,7 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
             if (!row) continue; // 安全確認
             if (row[0] === username && String(row[1]) === stageIndex) {
                 const range = sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2);
-                range.setNumberFormat("@STRING@"); // 文字列固定
+                range.setNumberFormat("@STRING@");
                 range.setValues([[
                     String(trackData?.totalTimer),
                     String(trackData?.timerPerStage),
@@ -238,16 +232,19 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
         }
 
         if (!rowFound) {
-            sheet.appendRow([
+            const lastRow = sheet.getLastRow() + 1;
+            const range = sheet.getRange(lastRow, 1, 1, ROAMBIRD_INFO_LEN);
+
+            range.setNumberFormat('@STRING@');
+            range.setValues([[
                 String(username),
                 String(stageIndex),
                 String(trackData?.totalTimer),
                 String(trackData?.timerPerStage),
                 String(trackData?.totalGoalCounter),
                 String(trackData?.streakGoalCounter)
-            ]);
-            const lastRow = sheet.getLastRow();
-            sheet.getRange(lastRow, 1, 1, ROAMBIRD_INFO_LEN).setNumberFormat("@STRING@");
+            ]]);
+
         }
     });
 
