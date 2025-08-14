@@ -199,6 +199,7 @@ function pullTrackedData(username: string): { isSuccess: boolean, trackedData: o
 function pushTrackedData(username: string, trackedData: TrackData): boolean {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
+
     if (!sheet) {
         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
         sheet.appendRow([
@@ -209,24 +210,28 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
             "TotalGoalCount",
             "StreakGoalCount"
         ]);
+        sheet.getRange(1, 1, 1, ROAMBIRD_INFO_LEN).setNumberFormat("@STRING@");
     }
 
-    const data = sheet.getDataRange().getValues();
+    const data: any[][] = sheet.getDataRange().getValues();
     const stageIndexes = Object.keys(trackedData);
+
     stageIndexes.forEach(stageIndex => {
         const trackData = trackedData[stageIndex];
         let rowFound = false;
+
         for (let idx = 0; idx < data.length; idx++) {
             const row = data[idx];
-            if (row === undefined) continue;
+            if (!row) continue; // 安全確認
             if (row[0] === username && String(row[1]) === stageIndex) {
-                const newValues = [[
-                    trackData?.totalTimer,
-                    trackData?.timerPerStage,
-                    trackData?.totalGoalCounter,
-                    trackData?.streakGoalCounter
-                ]];
-                sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
+                const range = sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2);
+                range.setNumberFormat("@STRING@"); // 文字列固定
+                range.setValues([[
+                    String(trackData?.totalTimer),
+                    String(trackData?.timerPerStage),
+                    String(trackData?.totalGoalCounter),
+                    String(trackData?.streakGoalCounter)
+                ]]);
                 rowFound = true;
                 break;
             }
@@ -234,54 +239,20 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
 
         if (!rowFound) {
             sheet.appendRow([
-                username,
-                stageIndex,
-                trackData?.totalTimer,
-                trackData?.timerPerStage,
-                trackData?.totalGoalCounter,
-                trackData?.streakGoalCounter
+                String(username),
+                String(stageIndex),
+                String(trackData?.totalTimer),
+                String(trackData?.timerPerStage),
+                String(trackData?.totalGoalCounter),
+                String(trackData?.streakGoalCounter)
             ]);
+            const lastRow = sheet.getLastRow();
+            sheet.getRange(lastRow, 1, 1, ROAMBIRD_INFO_LEN).setNumberFormat("@STRING@");
         }
     });
 
     return true;
 }
-
-// function pushTrackedData(username: string, trackedData: TrackData): boolean {
-//     const ss = SpreadsheetApp.getActiveSpreadsheet();
-//     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
-//     if (!sheet) {
-//         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
-//         sheet.appendRow([
-//             "Username",
-//             "StageIndex",
-//             "TotalTime",
-//             "ShortestTime",
-//             "TotalGoalCount",
-//             "StreakGoalCount"
-//         ]);
-//     }
-//
-//     const data = sheet.getDataRange().getValues();
-//     data.forEach((row, idx) => {
-//         if (row[0] === username) {
-//             // rowIndex is 1-based
-//             const stageIndex = String(row[1]);
-//             const trackData = trackedData[stageIndex];
-//             const newValues = [[
-//                 trackData?.totalTimer,
-//                 trackData?.timerPerStage,
-//                 trackData?.totalGoalCounter,
-//                 trackData?.streakGoalCounter
-//             ]];
-//
-//             sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
-//         }
-//     });
-//
-//     return true;
-// }
-
 
 function generateToken(username: string): string {
     const token = generateJWT(username, PEPPER, 3600); // available while one hour
