@@ -212,24 +212,75 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
     }
 
     const data = sheet.getDataRange().getValues();
-    data.forEach((row, idx) => {
-        if (row[0] === username) {
-            // rowIndex is 1-based
-            const stageIndex = String(row[1]);
-            const trackData = trackedData[stageIndex];
-            const newValues = [[
+    const stageIndexes = Object.keys(trackedData);
+    stageIndexes.forEach(stageIndex => {
+        const trackData = trackedData[stageIndex];
+        let rowFound = false;
+        for (let idx = 0; idx < data.length; idx++) {
+            const row = data[idx];
+            if (row === undefined) continue;
+            if (row[0] === username && String(row[1]) === stageIndex) {
+                const newValues = [[
+                    trackData?.totalTimer,
+                    trackData?.timerPerStage,
+                    trackData?.totalGoalCounter,
+                    trackData?.streakGoalCounter
+                ]];
+                sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
+                rowFound = true;
+                break;
+            }
+        }
+
+        if (!rowFound) {
+            sheet.appendRow([
+                username,
+                stageIndex,
                 trackData?.totalTimer,
                 trackData?.timerPerStage,
                 trackData?.totalGoalCounter,
                 trackData?.streakGoalCounter
-            ]];
-
-            sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
+            ]);
         }
     });
 
     return true;
 }
+
+// function pushTrackedData(username: string, trackedData: TrackData): boolean {
+//     const ss = SpreadsheetApp.getActiveSpreadsheet();
+//     let sheet = ss.getSheetByName(ROAMBIRD_SHEET_NAME);
+//     if (!sheet) {
+//         sheet = ss.insertSheet(ROAMBIRD_SHEET_NAME);
+//         sheet.appendRow([
+//             "Username",
+//             "StageIndex",
+//             "TotalTime",
+//             "ShortestTime",
+//             "TotalGoalCount",
+//             "StreakGoalCount"
+//         ]);
+//     }
+//
+//     const data = sheet.getDataRange().getValues();
+//     data.forEach((row, idx) => {
+//         if (row[0] === username) {
+//             // rowIndex is 1-based
+//             const stageIndex = String(row[1]);
+//             const trackData = trackedData[stageIndex];
+//             const newValues = [[
+//                 trackData?.totalTimer,
+//                 trackData?.timerPerStage,
+//                 trackData?.totalGoalCounter,
+//                 trackData?.streakGoalCounter
+//             ]];
+//
+//             sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2).setValues(newValues);
+//         }
+//     });
+//
+//     return true;
+// }
 
 
 function generateToken(username: string): string {
