@@ -38,7 +38,7 @@ function computeHash(input: string): string {
     var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
 
     // byte 配列を16進数文字列に変換
-    var hex = digest.map(function (byte) {
+    var hex = digest.map((byte) => {
         var v = (byte < 0 ? byte + 256 : byte).toString(16);
         return v.length == 1 ? "0" + v : v;
     }).join("");
@@ -56,6 +56,7 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
     try {
         body = JSON.parse(e.postData.contents);
     } catch (err) {
+        logAccess("", "", "[Invalid JSON] " + e.postData.contents, false);
         return sendJSON({ result: "failed", payload: "Invalid JSON" });
     }
     const mode = body.mode as string
@@ -97,18 +98,18 @@ function doPost(e: GoogleAppsScript.Events.DoPost): GoogleAppsScript.Content.Tex
             break;
     }
 
-    logAccess(mode, plainUsername, result);
+    logAccess(mode, plainUsername, e.postData.contents, result);
     let responseObj: { result: "success" | "failed", payload: object | string } = { result: result ? "success" : "failed", payload: payload };
     return sendJSON(responseObj);
 }
 
-function logAccess(mode: string, username: string, result: boolean): void {
+function logAccess(mode: string, username: string, receivedContent: string, result: boolean): void {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName("Log");
 
     if (!sheet) {
         sheet = ss.insertSheet("Log");
-        sheet.appendRow(["Timestamp", "Mode", "Username", "Result"]);
+        sheet.appendRow(["Timestamp", "Mode", "Username", "ReceivedContent", "Result"]);
     }
 
     const now = new Date();
@@ -116,6 +117,7 @@ function logAccess(mode: string, username: string, result: boolean): void {
         now.toLocaleString(),
         mode,
         username,
+        receivedContent,
         result
     ]);
 }
@@ -216,7 +218,7 @@ function pushTrackedData(username: string, trackedData: TrackData): boolean {
 
         for (let idx = 0; idx < data.length; idx++) {
             const row = data[idx];
-            if (!row) continue; // 安全確認
+            if (!row) continue;
             if (row[0] === username && String(row[1]) === stageIndex) {
                 const range = sheet.getRange(idx + 1, 3, 1, ROAMBIRD_INFO_LEN - 2);
                 range.setNumberFormat("@STRING@");
