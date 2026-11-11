@@ -2,11 +2,12 @@
     "name": "tomatechaccountapi",
     "version": "1.0.0",
     "description": "",
-    "main": "index.js",
+    "main": "main.js",
     "scripts": {
         "typecheck": "tsc --noEmit",
-        "compress": "terser ./build/main.js -o ./dist/bundle.js --mangle --comments false --keep-fnames",
-        "build": "tsc && npm run compress && copyfiles ./appsscript.json ./dist/",
+        "compress": "terser ./build/main.js ./build/*.js -o ./dist/bundle.js --compress --mangle --comments false --keep-fnames",
+        "cleanup": "node cleanup.js ./build",
+        "build": "tsc &&  npm run cleanup && npm run compress && copyfiles ./appsscript.json ./dist/",
         "push": "npm run build && clasp push"
     },
     "keywords": [],
@@ -14,7 +15,7 @@
     "license": "ISC",
     "type": "commonjs",
     "devDependencies": {
-        "@types/google-apps-script": "^1.0.99",
+        "@types/google-apps-script": "^2.0.0",
         "copyfiles": "^2.4.1",
         "terser": "^5.43.1",
         "typescript": "^5.9.2"
